@@ -12,6 +12,7 @@ log = logging.getLogger("stream_processor")
 
 def run():
     conn = get_conn()
+    price_failures = 0
     try:
         for t in TICKERS:
             try:
@@ -19,6 +20,7 @@ def run():
                 log.info("%s: %d new price rows", t, n)
             except Exception:
                 conn.rollback()
+                price_failures += 1
                 log.exception("Price ingest failed for %s", t)
             try:
                 n = save_news(conn, fetch_news(t))
@@ -28,6 +30,8 @@ def run():
                 log.exception("News ingest failed for %s", t)
     finally:
         conn.close()
+    if price_failures == len(TICKERS):
+        raise RuntimeError("Price ingest failed for every ticker")
 
 
 if __name__ == "__main__":
