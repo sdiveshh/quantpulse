@@ -1,0 +1,1 @@
+ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS embedded_at TIMESTAMPTZ;

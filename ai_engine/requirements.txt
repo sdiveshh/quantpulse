@@ -1,0 +1,5 @@
+qdrant-client>=1.12,<2
+fastembed
+vaderSentiment
+psycopg2-binary
+python-dotenv

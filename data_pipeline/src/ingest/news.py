@@ -29,8 +29,8 @@ def fetch_news(ticker, page_size=20):
             "language": "en",
             "sortBy": "publishedAt",
             "pageSize": page_size,
-            "apiKey": key,
         },
+        headers={"X-Api-Key": key},
         timeout=20,
     )
     resp.raise_for_status()
