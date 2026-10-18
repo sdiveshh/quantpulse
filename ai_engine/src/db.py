@@ -20,4 +20,4 @@ def get_conn():
 
 
 def get_qdrant():
-    return QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"))
+    return QdrantClient(url=os.getenv("QDRANT_URL", "http://localhost:6333"), check_compatibility=False)

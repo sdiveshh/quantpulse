@@ -3,3 +3,5 @@ fastembed
 vaderSentiment
 psycopg2-binary
 python-dotenv
+langgraph
+langchain-google-genai
