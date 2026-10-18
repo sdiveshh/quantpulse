@@ -1,13 +1,16 @@
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from logging_setup import setup_logging
 from schemas import (
     Candle,
     ChatRequest,
@@ -17,7 +20,9 @@ from schemas import (
     PriceSeries,
     Summary,
 )
+from security import chat_limit, client_id, general_limit, require_api_key
 
+setup_logging()
 log = logging.getLogger("backend")
 TICKERS = {"AAPL", "MSFT", "GOOGL", "TSLA", "NVDA"}
 
@@ -76,18 +81,53 @@ async def lifespan(app: FastAPI):
         max_size=5,
     )
     app.state.http = httpx.AsyncClient(timeout=90)
+    import os
+
+    if not os.getenv("API_KEY"):
+        log.warning("API_KEY is not set: authentication is DISABLED")
     yield
     await app.state.http.aclose()
     await app.state.pool.close()
 
 
-app = FastAPI(title="QuantPulse API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="QuantPulse API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
     allow_methods=["GET", "POST"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    rid = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    base = {
+        "request_id": rid,
+        "method": request.method,
+        "path": request.url.path,
+        "client": client_id(request),
+    }
+    try:
+        response = await call_next(request)
+    except Exception:
+        log.exception("unhandled error", extra=base)
+        raise
+    response.headers["X-Request-ID"] = rid
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    log.info(
+        "request",
+        extra={
+            **base,
+            "status": response.status_code,
+            "duration_ms": round((time.perf_counter() - start) * 1000, 1),
+        },
+    )
+    return response
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key), Depends(general_limit)])
 
 
 def valid_ticker(ticker: str) -> str:
@@ -107,44 +147,49 @@ async def health():
     return {"status": "ok", "db": True}
 
 
-@app.get("/api/tickers", response_model=list[str])
+@api.get("/tickers", response_model=list[str])
 async def tickers():
     return sorted(TICKERS)
 
 
-@app.get("/api/summary", response_model=list[Summary])
+@api.get("/summary", response_model=list[Summary])
 async def summary():
     rows = await app.state.pool.fetch(SUMMARY_SQL)
     return [Summary(**dict(r)) for r in rows]
 
 
-@app.get("/api/prices/{ticker}", response_model=PriceSeries)
+@api.get("/prices/{ticker}", response_model=PriceSeries)
 async def prices(ticker: str, limit: int = Query(130, ge=1, le=1000)):
     t = valid_ticker(ticker)
     rows = await app.state.pool.fetch(PRICES_SQL, t, limit)
     return PriceSeries(ticker=t, candles=[Candle(**dict(r)) for r in rows])
 
 
-@app.get("/api/features/{ticker}", response_model=list[Feature])
+@api.get("/features/{ticker}", response_model=list[Feature])
 async def features(ticker: str, limit: int = Query(130, ge=1, le=1000)):
     t = valid_ticker(ticker)
     rows = await app.state.pool.fetch(FEATURES_SQL, t, limit)
     return [Feature(**dict(r)) for r in rows]
 
 
-@app.get("/api/news", response_model=list[NewsItem])
+@api.get("/news", response_model=list[NewsItem])
 async def news(ticker: Optional[str] = None, limit: int = Query(20, ge=1, le=100)):
     t = valid_ticker(ticker) if ticker else None
     rows = await app.state.pool.fetch(NEWS_SQL, t, limit)
     return [NewsItem(**dict(r)) for r in rows]
 
 
-@app.post("/api/chat", response_model=ChatResponse)
+@api.post("/chat", response_model=ChatResponse, dependencies=[Depends(chat_limit)])
 async def chat(req: ChatRequest):
     try:
         resp = await app.state.http.post(f"{settings.ai_url}/chat", json=req.model_dump())
     except httpx.HTTPError:
+        log.exception("AI service unreachable")
         raise HTTPException(status_code=502, detail="AI service is not reachable")
     if resp.status_code != 200:
+        log.warning("AI service returned %s", resp.status_code)
         raise HTTPException(status_code=502, detail="AI service could not answer right now")
     return ChatResponse(**resp.json())
+
+
+app.include_router(api)

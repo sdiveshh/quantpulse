@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import Chat from "./Chat";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API = "";
 
 async function get(path) {
   const r = await fetch(`${API}${path}`);

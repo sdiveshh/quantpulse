@@ -29,7 +29,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -43,7 +43,7 @@ services:
     image: qdrant/qdrant:v1.12.4
     container_name: qp-qdrant
     ports:
-      - "6333:6333"
+      - "127.0.0.1:6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -60,7 +60,7 @@ services:
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     volumes:
       - fastembed_cache:/models
     depends_on:
@@ -85,6 +85,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       AI_SERVICE_URL: http://ai-engine:8100
+      API_KEY: ${API_KEY}
     ports:
       - "8000:8000"
     depends_on:
@@ -103,6 +104,9 @@ services:
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8000
     container_name: qp-frontend
+    environment:
+      API_KEY: ${API_KEY}
+      BACKEND_URL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
